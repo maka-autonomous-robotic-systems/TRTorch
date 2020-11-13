@@ -28,7 +28,7 @@ auto select_registrations TRTORCH_UNUSED =
 
                     auto out = ctx->AssociateValueAndTensor(n->outputs()[0], shuffle_layer->getOutput(0));
 
-                    // LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
 
                     return true;
                   }})
@@ -36,12 +36,9 @@ auto select_registrations TRTORCH_UNUSED =
                   [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
                     auto in = args[0].ITensor();
 
-                    Weights out_tensor = Weights(ctx, torch::ones({1}));
-                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], in);
 
-                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
-
-                    // LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
 
                     return true;
                   }})
@@ -66,18 +63,26 @@ auto select_registrations TRTORCH_UNUSED =
 
                     end = std::min((long)dims.d[dim], end);
                     dims.d[dim] = end - start;
-                    LOG_DEBUG("start " << start);
-                    LOG_DEBUG("end " << end);
-                    LOG_DEBUG("dims " << dims);
 
-                    Weights out_tensor;
-                    if (dims.nbDims > 3) {
-                      out_tensor = Weights(ctx, torch::ones({dims.d[0],dims.d[1], dims.d[2], dims.d[3]}));
-                    } else {
-                      out_tensor = Weights(ctx, torch::ones({dims.d[0], dims.d[1], dims.d[2]}));
+                    nvinfer1::Dims start_idx;
+                    start_idx.nbDims = dims.nbDims;
+                    nvinfer1::Dims sizes;
+                    sizes.nbDims = dims.nbDims;
+                    nvinfer1::Dims strides;
+                    strides.nbDims = dims.nbDims;
+                    for (int i = 0; i < dims.nbDims; i++) {
+                      if (i == dim) {
+                        start_idx.d[i] = start;
+                        sizes.d[i] = end - start;
+                      } else {
+                        start_idx.d[i] = 0;
+                        sizes.d[i] = dims.d[i];
+                      }
+                      strides.d[i] = 0;
                     }
-                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
-                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
+
+                    auto slice_layer = ctx->net->addSlice(*in,start_idx, sizes, strides);
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], slice_layer->getOutput(0));
 
                     LOG_DEBUG("Output tensor shape: " << out->getDimensions());
 
@@ -94,17 +99,12 @@ auto select_registrations TRTORCH_UNUSED =
 
                     auto dims = in->getDimensions();
 
+                    nvinfer1::Dims2 pre_pad = {top, left};
+                    nvinfer1::Dims2 post_pad = {bottom, right};
 
+                    auto padding_layer = ctx->net->addPaddingNd(*in, pre_pad, post_pad);
 
-                    Weights out_tensor;
-                    if (dims.nbDims > 3) {
-                      out_tensor = Weights(ctx, torch::ones({dims.d[0],dims.d[1], dims.d[2] + top + bottom, dims.d[3] + left + right}));
-                    } else {
-                      out_tensor = Weights(ctx, torch::ones({dims.d[0], dims.d[1] + top + bottom, dims.d[2] + left + right}));
-                    }
-                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
-
-                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], padding_layer->getOutput(0));
 
                     LOG_DEBUG("Output tensor shape: " << out->getDimensions());
 
