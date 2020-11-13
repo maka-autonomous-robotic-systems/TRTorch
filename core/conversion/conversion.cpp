@@ -176,14 +176,21 @@ void AddInputs(ConversionCtx* ctx, at::ArrayRef<const torch::jit::Value*> inputs
 }
 
 void MarkOutputs(ConversionCtx* ctx, at::ArrayRef<const torch::jit::Value*> outputs) {
+  for (auto value : ctx->value_tensor_map) {
+    LOG_DEBUG("value " << *value.first->node());
+  }
   for (auto out : outputs) {
+    LOG_DEBUG("out name " << *out->node());
     std::string name = std::string("output_") + std::to_string(ctx->num_outputs);
     auto it = ctx->value_tensor_map.find(out);
     // Leaves the potential for unused outputs to be populated with nullptr
     // "safely"
-    TRTORCH_CHECK(
-        it != ctx->value_tensor_map.end() && it->second,
-        "No corresponding output TRT Tensor found for TorchScript output: " << out->debugName());
+    if (it == ctx->value_tensor_map.end() || !it->second) {
+      continue;
+    }
+    // TRTORCH_CHECK(
+    //     it != ctx->value_tensor_map.end() && it->second,
+    //     "No corresponding output TRT Tensor found for TorchScript output: " << out->debugName());
     auto out_tensor = it->second;
     out_tensor->setName(name.c_str());
     ctx->net->markOutput(*out_tensor);

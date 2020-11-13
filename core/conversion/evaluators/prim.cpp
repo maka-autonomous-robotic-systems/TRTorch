@@ -62,7 +62,7 @@ auto prim_registrations =
                           c10::List<at::Tensor> list;
                           list.reserve(num_inputs);
                           for (auto in : n->inputs()) {
-                            if (args.at(in).isIValue()) {
+                            if (args.at(in).isIValue() && args.at(in).IValue()->isTensor()) {
                               list.emplace_back(std::move(args.at(in).unwrapToTensor()));
                             }
                           }

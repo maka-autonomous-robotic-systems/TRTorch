@@ -15,8 +15,104 @@ namespace {
 
 auto select_registrations TRTORCH_UNUSED =
     RegisterNodeConversionPatterns()
+        .pattern({"aten::squeeze.dim(Tensor(a) self, int dim) -> (Tensor(a))",
+                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    auto in = args[0].ITensor();
+                    // Wrap negative indices
+                    auto dim = (args[1].unwrapToInt() + in->getDimensions().nbDims) % in->getDimensions().nbDims;
+                    LOG_DEBUG("dim " << dim);
+
+                    auto shuffle_layer = ctx->net->addShuffle(*in);
+                    TRTORCH_CHECK(shuffle_layer, "Unable to create shuffle layer from node: " << *n);
+                    shuffle_layer->setReshapeDimensions(util::squeezeDims(in->getDimensions(), dim));
+
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], shuffle_layer->getOutput(0));
+
+                    // LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+
+                    return true;
+                  }})
+        .pattern({"aten::Int.Tensor(Tensor a) -> (int)",
+                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    auto in = args[0].ITensor();
+
+                    Weights out_tensor = Weights(ctx, torch::ones({1}));
+                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
+
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
+
+                    // LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+
+                    return true;
+                  }})
+        .pattern({"aten::nonzero(Tensor self) -> (Tensor)",
+                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    auto in = args[0].ITensor();
+
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], in);
+
+                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+
+                    return true;
+                  }})
+        .pattern({"aten::slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> (Tensor(a))",
+                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    auto in = args[0].ITensor();
+                    auto dim = args[1].unwrapToInt();
+                    auto start = args[2].unwrapToInt();
+                    auto end = args[3].unwrapToInt();
+                    
+                    auto dims = in->getDimensions();
+
+                    end = std::min((long)dims.d[dim], end);
+                    dims.d[dim] = end - start;
+                    LOG_DEBUG("start " << start);
+                    LOG_DEBUG("end " << end);
+                    LOG_DEBUG("dims " << dims);
+
+                    Weights out_tensor;
+                    if (dims.nbDims > 3) {
+                      out_tensor = Weights(ctx, torch::ones({dims.d[0],dims.d[1], dims.d[2], dims.d[3]}));
+                    } else {
+                      out_tensor = Weights(ctx, torch::ones({dims.d[0], dims.d[1], dims.d[2]}));
+                    }
+                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
+
+                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+
+                    return true;
+                  }})
+        .pattern({"aten::constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> (Tensor)",
+                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    auto in = args[0].ITensor();
+                    auto pad_dims = util::toDims(args[1].unwrapToIntList());
+                    auto left = pad_dims.d[0];
+                    auto right = pad_dims.d[1];
+                    auto top = pad_dims.d[2];
+                    auto bottom = pad_dims.d[3];
+
+                    auto dims = in->getDimensions();
+
+
+
+                    Weights out_tensor;
+                    if (dims.nbDims > 3) {
+                      out_tensor = Weights(ctx, torch::ones({dims.d[0],dims.d[1], dims.d[2] + top + bottom, dims.d[3] + left + right}));
+                    } else {
+                      out_tensor = Weights(ctx, torch::ones({dims.d[0], dims.d[1] + top + bottom, dims.d[2] + left + right}));
+                    }
+                    auto const_layer = ctx->net->addConstant(out_tensor.shape, out_tensor.data);
+
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], const_layer->getOutput(0));
+
+                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
+
+                    return true;
+                  }})
         .pattern({"aten::select.int(Tensor(a) self, int dim, int index) -> (Tensor(a))",
                   [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
+                    LOG_DEBUG("begin select");
                     auto in = args[0].ITensor();
                     auto axis = args[1].unwrapToInt();
                     auto ind = (int32_t)args[2].unwrapToInt();
