@@ -29,6 +29,8 @@ class Conv2DPlugin : public nvinfer1::IPluginV2DynamicExt {
   DataType dtype_;
 
   cudnnHandle_t cudnn_;
+//   cudnnTensorDescriptor_t input_descriptor_;
+//   cudnnFilterDescriptor_t kernel_descriptor_;
 
  protected:
   // To prevent compiler warnings

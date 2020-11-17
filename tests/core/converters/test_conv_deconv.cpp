@@ -36,6 +36,51 @@ void conv_test_helper(std::string graph_ir) {
   ASSERT_TRUE(trtorch::tests::util::almostEqual(jit_results[0], trt, 2e-6));
 }
 
+TEST(Converters, ATenConvolutionTensorConvertsCorrectly) {
+  const auto graph = R"IR(
+      graph(%0 : Tensor,
+            %1 : Tensor,
+            %2 : Float(8:1)):
+        %3 : int = prim::Constant[value=1]()
+        %4 : int = prim::Constant[value=0]()
+        %5 : int = prim::Constant[value=1]()
+        %6 : int = prim::Constant[value=0]()
+        %7 : bool = prim::Constant[value=0]()
+        %13 : bool = prim::Constant[value=1]()
+        %8 : int[] = prim::ListConstruct(%3, %3)
+        %9 : int[] = prim::ListConstruct(%4, %4)
+        %10 : int[] = prim::ListConstruct(%5, %5)
+        %11 : int[] = prim::ListConstruct(%6, %6)
+        %12 : Tensor = aten::_convolution(%0, %1, %2, %8, %9, %10, %7, %11, %3, %7, %13, %13)
+        return (%12))IR";
+
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(graph, &*g);
+
+  auto in = at::randint(1, 10, {1, 3, 10, 10}, {at::kCUDA});
+  auto w = at::randint(1, 10, {8, 3, 5, 5}, {at::kCUDA});
+  // Unsupported for now
+  auto b = at::zeros({8}, {at::kCUDA});
+
+  auto jit_in = at::clone(in);
+  auto jit_w = at::clone(w);
+  auto jit_b = at::clone(b);
+
+  auto params = trtorch::core::conversion::get_named_params(g->inputs(), {jit_b});
+  auto jit_results = trtorch::tests::util::RunGraph(g, params, {jit_in, jit_w});
+
+  auto trt_in = at::clone(in);
+  auto trt_w = at::clone(w);
+  auto trt_b = at::clone(b);
+  params = trtorch::core::conversion::get_named_params(g->inputs(), {trt_b});
+  auto trt_results = trtorch::tests::util::RunGraphEngine(g, params, {trt_in, trt_w});
+
+  auto trt = trt_results[0].reshape(jit_results[0].sizes());
+
+  ASSERT_TRUE(trtorch::tests::util::almostEqual(jit_results[0], trt, 2e-6));
+}
+
+/*
 TEST(Converters, ATenConvolutionConvertsCorrectly) {
   const auto graph = R"IR(
       graph(%0 : Tensor,
@@ -594,3 +639,4 @@ TEST(Converters, ATenConvTransposeWithPaddingConvertsCorrectly) {
 
 //     conv_test_helper(graph);
 // }
+*/

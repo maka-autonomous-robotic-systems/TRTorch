@@ -1,5 +1,7 @@
 #include "conv2d_plugin.h"
 
+#include <cudnn.h>
+
 using namespace nvinfer1;
 
 namespace trtorch {
@@ -46,16 +48,43 @@ nvinfer1::IPluginV2DynamicExt* Conv2DPlugin::clone() const {
   return new Conv2DPlugin();
 }
 
+#define checkCUDNN(expression)                               \
+  {                                                          \
+    cudnnStatus_t status = (expression);                     \
+    if (status != CUDNN_STATUS_SUCCESS) {                    \
+      std::cerr << "Error on line " << __LINE__ << ": "      \
+                << cudnnGetErrorString(status) << std::endl; \
+      std::exit(EXIT_FAILURE);                               \
+    }                                                        \
+  }
+
 nvinfer1::DimsExprs Conv2DPlugin::getOutputDimensions(
     int outputIndex,
     const nvinfer1::DimsExprs* inputs,
     int nbInputs,
     nvinfer1::IExprBuilder& exprBuilder) {
-  nvinfer1::DimsExprs output;
-  output.nbDims = 2;
+  const int pad_width = 0;
+  const int pad_height = 0;
+  const int horizontal_stride = 1;
+  const int vertical_stride = 1;
 
-  output.d[0] = exprBuilder.constant(1);
-  output.d[1] = exprBuilder.constant(4);
+  auto get_dimension = [&](const nvinfer1::IDimensionExpr &input_size, const nvinfer1::IDimensionExpr &kernel_size, int padding, int stride) {
+    return exprBuilder.operation(nvinfer1::DimensionOperation::kSUM,
+              *exprBuilder.operation(nvinfer1::DimensionOperation::kCEIL_DIV,
+                *exprBuilder.operation(nvinfer1::DimensionOperation::kSUM,
+                  *exprBuilder.operation(nvinfer1::DimensionOperation::kSUB, input_size, kernel_size),
+                  *exprBuilder.constant(padding * 2)),
+                *exprBuilder.constant(stride)),
+              *exprBuilder.constant(1));
+  };
+
+  nvinfer1::DimsExprs output;
+  output.nbDims = 4;
+
+  output.d[0] = inputs[0].d[0];
+  output.d[1] = inputs[1].d[0];
+  output.d[2] = get_dimension(*inputs[0].d[2], *inputs[1].d[2], pad_height, vertical_stride);
+  output.d[3] = get_dimension(*inputs[0].d[3], *inputs[1].d[3], pad_width, horizontal_stride);
 
   return output;
 }
@@ -103,20 +132,26 @@ bool Conv2DPlugin::supportsFormatCombination(
     const nvinfer1::PluginTensorDesc* inOut,
     int nbInputs,
     int nbOutputs) {
-  TRTORCH_ASSERT(0 <= pos && pos <= 1, "There should be exactly 2 connections to the plugin - 1 input, 1 output");
-  TRTORCH_ASSERT(nbInputs == 1, "Expected a single tensor as input to interpolate plugin");
-  TRTORCH_ASSERT(nbOutputs == 1, "Expected a single tensor as output to interpolate plugin");
+  TRTORCH_ASSERT(0 <= pos && pos <= 2, "There should be exactly 3 connections to the plugin - 2 input, 1 output");
+  TRTORCH_ASSERT(nbInputs == 2, "Expected a two tensors as input to conv2d plugin");
+  TRTORCH_ASSERT(nbOutputs == 1, "Expected a single tensor as output to conv2d plugin");
 
-  const PluginTensorDesc& in = inOut[0];
+  const PluginTensorDesc& in1 = inOut[0];
+
+  const PluginTensorDesc& in2 = inOut[1];
 
   if (pos == 0) {
-    return (in.type == nvinfer1::DataType::kFLOAT) && (in.format == nvinfer1::TensorFormat::kLINEAR);
+    return (in1.type == nvinfer1::DataType::kFLOAT) && (in1.format == nvinfer1::TensorFormat::kLINEAR);
   }
 
-  // pos == 1, accessing information about output tensor
-  const PluginTensorDesc& out = inOut[1];
+  if (pos == 1) {
+    return (in2.type == nvinfer1::DataType::kFLOAT) && (in2.format == nvinfer1::TensorFormat::kLINEAR);
+  }
 
-  return (in.type == out.type) && (in.format == out.format);
+  // pos == 2, accessing information about output tensor
+  const PluginTensorDesc& out = inOut[2];
+
+  return (in1.type == out.type) && (in1.format == out.format);
 }
 
 void Conv2DPlugin::configurePlugin(
@@ -142,13 +177,15 @@ int Conv2DPlugin::enqueue(
     void* const* outputs,
     void* workspace,
     cudaStream_t stream) {
-  at::Tensor input = at::from_blob((void*)inputs[0], util::toVec(inputDesc->dims), [](void*) {}, tensor_options_);
+  at::Tensor input = at::from_blob((void*)inputs[0], util::toVec(inputDesc[0].dims), [](void*) {}, tensor_options_);
   auto input_ptr = (float *)input.data_ptr();
+  at::Tensor weights = at::from_blob((void*)inputs[1], util::toVec(inputDesc[1].dims), [](void*) {}, tensor_options_);
+  auto weights_ptr = (float *)weights.data_ptr();
   at::Tensor output = at::from_blob(outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
   auto output_ptr = (float *)output.data_ptr();
 
-  at::Tensor index = at::zeros({1}, at::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA));
-  auto index_ptr = (int32_t *)index.data_ptr();
+  // at::Tensor index = at::zeros({1}, at::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA));
+  // auto index_ptr = (int32_t *)index.data_ptr();
 
   at::cuda::CUDAStream torch_stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAStreamGuard torch_guard(torch_stream);
@@ -158,6 +195,100 @@ int Conv2DPlugin::enqueue(
   cudaEventRecord(event, stream);
 
   cudaStreamWaitEvent(torch_stream.stream(), event, 0);
+
+    cudnnTensorDescriptor_t input_descriptor;
+  checkCUDNN(cudnnCreateTensorDescriptor(&input_descriptor));
+  checkCUDNN(cudnnSetTensor4dDescriptor(input_descriptor,
+                                        /*format=*/CUDNN_TENSOR_NCHW,
+                                        /*dataType=*/CUDNN_DATA_FLOAT,
+                                        /*batch_size=*/inputDesc[0].dims.d[0],
+                                        /*channels=*/inputDesc[0].dims.d[1],
+                                        /*image_height=*/inputDesc[0].dims.d[2],
+                                        /*image_width=*/inputDesc[0].dims.d[3]));
+
+  cudnnFilterDescriptor_t kernel_descriptor;
+  checkCUDNN(cudnnCreateFilterDescriptor(&kernel_descriptor));
+  checkCUDNN(cudnnSetFilter4dDescriptor(kernel_descriptor,
+                                        /*dataType=*/CUDNN_DATA_FLOAT,
+                                        /*format=*/CUDNN_TENSOR_NCHW,
+                                        /*out_channels=*/inputDesc[1].dims.d[0],
+                                        /*in_channels=*/inputDesc[1].dims.d[1],
+                                        /*kernel_height=*/inputDesc[1].dims.d[2],
+                                        /*kernel_width=*/inputDesc[1].dims.d[3]));
+
+  cudnnConvolutionDescriptor_t convolution_descriptor;
+  checkCUDNN(cudnnCreateConvolutionDescriptor(&convolution_descriptor));
+  checkCUDNN(cudnnSetConvolution2dDescriptor(convolution_descriptor,
+                                             /*pad_height=*/0,
+                                             /*pad_width=*/0,
+                                             /*vertical_stride=*/1,
+                                             /*horizontal_stride=*/1,
+                                             /*dilation_height=*/1,
+                                             /*dilation_width=*/1,
+                                             /*mode=*/CUDNN_CROSS_CORRELATION,
+                                             /*computeType=*/CUDNN_DATA_FLOAT));
+
+  int batch_size{0}, channels{0}, height{0}, width{0};
+  checkCUDNN(cudnnGetConvolution2dForwardOutputDim(convolution_descriptor,
+                                                   input_descriptor,
+                                                   kernel_descriptor,
+                                                   &batch_size,
+                                                   &channels,
+                                                   &height,
+                                                   &width));
+  std::cout << batch_size << " " << channels << " " << height << " " << width << std::endl;
+
+  cudnnTensorDescriptor_t output_descriptor;
+  checkCUDNN(cudnnCreateTensorDescriptor(&output_descriptor));
+  checkCUDNN(cudnnSetTensor4dDescriptor(output_descriptor,
+                                        /*format=*/CUDNN_TENSOR_NCHW,
+                                        /*dataType=*/CUDNN_DATA_FLOAT,
+                                        /*batch_size=*/outputDesc[0].dims.d[0],
+                                        /*channels=*/outputDesc[0].dims.d[1],
+                                        /*image_height=*/outputDesc[0].dims.d[2],
+                                        /*image_width=*/outputDesc[0].dims.d[3]));
+
+  int num_algos = 0;
+  cudnnConvolutionFwdAlgoPerf_t convolution_algorithm;
+  checkCUDNN(
+      cudnnGetConvolutionForwardAlgorithm_v7(cudnn_,
+                                          input_descriptor,
+                                          kernel_descriptor,
+                                          convolution_descriptor,
+                                          output_descriptor,
+                                          1,
+                                          &num_algos,
+                                          &convolution_algorithm));
+
+  std::cout << convolution_algorithm.algo << std::endl;
+
+  size_t workspace_bytes{0};
+  checkCUDNN(cudnnGetConvolutionForwardWorkspaceSize(cudnn_,
+                                                     input_descriptor,
+                                                     kernel_descriptor,
+                                                     convolution_descriptor,
+                                                     output_descriptor,
+                                                     convolution_algorithm.algo,
+                                                     &workspace_bytes));
+
+  void* d_workspace{nullptr};
+  cudaMalloc(&d_workspace, workspace_bytes);
+
+  const float alpha = 1.0f, beta = 0.0f;
+
+  checkCUDNN(cudnnConvolutionForward(cudnn_,
+                                     &alpha,
+                                     input_descriptor,
+                                     input_ptr,
+                                     kernel_descriptor,
+                                     weights_ptr,
+                                     convolution_descriptor,
+                                     convolution_algorithm.algo,
+                                     d_workspace,
+                                     workspace_bytes,
+                                     &beta,
+                                     output_descriptor,
+                                     output_ptr));
 
   cudaEvent_t torch_event;
   cudaEventCreate(&torch_event);
@@ -179,7 +310,7 @@ const char* Conv2DPluginCreator::getPluginNamespace() const {
 }
 
 const char* Conv2DPluginCreator::getPluginName() const {
-  return "Interpolate";
+  return "Conv2D";
 }
 
 const char* Conv2DPluginCreator::getPluginVersion() const {

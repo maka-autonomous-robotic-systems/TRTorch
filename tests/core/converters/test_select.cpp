@@ -5,7 +5,29 @@
 #include "tests/util/util.h"
 #include "torch/csrc/jit/ir/irparser.h"
 
-TEST(Converters, ATenSelectIntConvertsCorrectly) {
+TEST(Converters, ATenNonZeroConvertsCorrectly) {
+  const auto graph = R"IR(
+      graph(%0 : Tensor):
+        %3 : Tensor = aten::nonzero(%0)
+        return (%3))IR";
+
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(graph, &*g);
+
+  auto in = at::cat({at::ones({1, 1, 1, 1}, {at::kCUDA}), at::zeros({1, 1, 1, 1}, {at::kCUDA})});
+
+  auto jit_in = at::clone(in);
+  auto params = trtorch::core::conversion::get_named_params(g->inputs(), {});
+  auto jit_results = trtorch::tests::util::RunGraph(g, params, {jit_in});
+
+  auto trt_in = at::clone(in);
+  params = trtorch::core::conversion::get_named_params(g->inputs(), {});
+  auto trt_results = trtorch::tests::util::RunGraphEngine(g, params, {trt_in});
+
+  ASSERT_TRUE(trtorch::tests::util::almostEqual(jit_results[0], trt_results[0], 2e-6));
+}
+
+/*TEST(Converters, ATenSelectIntConvertsCorrectly) {
   const auto graph = R"IR(
       graph(%0 : Tensor):
         %2 : int = prim::Constant[value=0]()
@@ -204,4 +226,4 @@ TEST(Converters, ATenSliceNegEndIndexConvertsCorrectly) {
   auto trt = trt_results[0].reshape(jit_results[0].sizes());
 
   ASSERT_TRUE(trtorch::tests::util::almostEqual(jit_results[0], trt, 2e-6));
-}
+}*/

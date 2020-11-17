@@ -157,11 +157,12 @@ int NonZeroPlugin::enqueue(
 
   cudaStreamWaitEvent(torch_stream.stream(), event, 0);
 
+  auto num_dims = input.dim();
   auto dims = input.sizes();
-  const int batch_size = dims[0];
-  const int channels = dims[1];
-  const int height = dims[2];
-  const int width = dims[3];
+  const int batch_size = num_dims > 3 ? dims[num_dims - 3] : 1;
+  const int channels = num_dims > 2 ? dims[num_dims - 2] : 1;
+  const int height = num_dims > 1 ? dims[num_dims - 1] : 1;
+  const int width = dims[num_dims - 1];
 
   NonZeroKernel(input_ptr, output_ptr, index_ptr, batch_size, channels, height, width);
 
@@ -185,7 +186,7 @@ const char* NonZeroPluginCreator::getPluginNamespace() const {
 }
 
 const char* NonZeroPluginCreator::getPluginName() const {
-  return "Interpolate";
+  return "NonZero";
 }
 
 const char* NonZeroPluginCreator::getPluginVersion() const {

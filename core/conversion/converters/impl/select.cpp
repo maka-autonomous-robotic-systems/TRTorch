@@ -55,8 +55,7 @@ auto select_registrations TRTORCH_UNUSED =
 
                     nonzero_layer->setName(util::node_info(n).c_str());
 
-                    auto layer_output = ctx->AssociateValueAndTensor(n->outputs()[0], nonzero_layer->getOutput(0));
-                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], in);
+                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], nonzero_layer->getOutput(0));
 
                     LOG_DEBUG("Output tensor shape: " << out->getDimensions());
 

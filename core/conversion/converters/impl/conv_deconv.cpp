@@ -21,7 +21,7 @@ auto conv_registrations TRTORCH_UNUSED = RegisterNodeConversionPatterns().patter
 
       if (args[1].isITensor()) {
         auto w_dims = args[1].ITensor()->getDimensions();
-        auto w = Weights(ctx, at::ones({w_dims.d[0],w_dims.d[1],w_dims.d[2],w_dims.d[3]}));
+        auto w = args[1].ITensor();
         auto stride = util::toDims(args[3].unwrapToIntList());
         LOG_DEBUG("stride: " << stride);
         auto padding = util::toDims(args[4].unwrapToIntList());
@@ -33,49 +33,23 @@ auto conv_registrations TRTORCH_UNUSED = RegisterNodeConversionPatterns().patter
         LOG_DEBUG("out_padding: " << out_padding);
         int64_t groups = args[8].unwrapToInt();
 
-        nvinfer1::ILayer* new_layer;
-        if (transposed) {
-          nvinfer1::IDeconvolutionLayer* deconv;
-          if (args[2].IValue()->isTensor()) {
-            Weights b(ctx, args[2].IValue()->toTensor());
-            deconv = ctx->net->addDeconvolutionNd(*in, w.num_input_maps, w.kernel_shape, w.data, b.data);
-          } else {
-            deconv = ctx->net->addDeconvolutionNd(*in, w.num_input_maps, w.kernel_shape, w.data, {});
-          }
-
-          TRTORCH_CHECK(deconv, "Unable to create deconvolution layer from node: " << *n);
-
-          deconv->setStrideNd(stride);
-          deconv->setPaddingNd(padding);
-  #if NV_TENSORRT_MAJOR > 7 || (NV_TENSORRT_MAJOR == 7 && NV_TENSORRT_MINOR == 1)
-          deconv->setDilationNd(dilation);
-          deconv->setNbGroups(groups);
-  #endif
-          new_layer = deconv;
+        Weights b;
+        if (args[2].IValue()->isTensor()) {
+          b = Weights(ctx, args[2].unwrapToTensor());
         } else {
-          Weights b;
-          if (args[2].IValue()->isTensor()) {
-            b = Weights(ctx, args[2].unwrapToTensor());
-          } else {
-            b = Weights(ctx, at::zeros({1}));
-          }
-          auto creator = new plugins::Conv2DPluginCreator();
-          auto plugin = creator->createPlugin("conv2d");
-
-          auto nonzero_layer = ctx->net->addPluginV2(reinterpret_cast<nvinfer1::ITensor* const*>(&in), 1, *plugin);
-          TRTORCH_CHECK(nonzero_layer, "Unable to create nonzero plugin from node" << *n);
-
-          // conv->setStrideNd(stride);
-          // conv->setPaddingMode(nvinfer1::PaddingMode::kCAFFE_ROUND_DOWN);
-          // conv->setPaddingNd(padding);
-          // conv->setPostPadding(out_padding);
-          // conv->setDilationNd(dilation);
-          // conv->setNbGroups(groups);
-          new_layer = nonzero_layer;
+          b = Weights(ctx, at::zeros({1}));
         }
-        new_layer->setName(util::node_info(n).c_str());
+        auto creator = new plugins::Conv2DPluginCreator();
+        auto plugin = creator->createPlugin("conv2d");
 
-        auto out = ctx->AssociateValueAndTensor(n->outputs()[0], new_layer->getOutput(0));
+        nvinfer1::ITensor* inputs[] = {in, w};
+
+        auto conv_layer = ctx->net->addPluginV2(reinterpret_cast<nvinfer1::ITensor* const*>(inputs), 2, *plugin);
+        TRTORCH_CHECK(conv_layer, "Unable to create nonzero plugin from node" << *n);
+
+        conv_layer->setName(util::node_info(n).c_str());
+
+        auto out = ctx->AssociateValueAndTensor(n->outputs()[0], conv_layer->getOutput(0));
 
         LOG_DEBUG("Output tensor shape: " << out->getDimensions());
       } else {
