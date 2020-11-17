@@ -80,7 +80,7 @@ auto instance_norm_registrations TRTORCH_UNUSED = RegisterNodeConversionPatterns
         auto gamma_weights = Weights(ctx, gamma);
         auto beta_weights = Weights(ctx, beta);
 
-        out_tensor = ctx->net->addScale(*var_trt, nvinfer1::ScaleMode::kCHANNEL, beta_weights.data, gamma_weights.data, ones_weights_channels.data)->getOutput(0);
+        out_tensor = ctx->net->addScale(*out_tensor, nvinfer1::ScaleMode::kCHANNEL, beta_weights.data, gamma_weights.data, ones_weights_channels.data)->getOutput(0);
       } else {
         torch::Tensor mean, var;
         if (ctx->input_is_dynamic) {
