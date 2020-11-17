@@ -2,6 +2,7 @@
 #include "core/conversion/converters/converters.h"
 #include "core/util/prelude.h"
 #include "torch/torch.h"
+#include "plugins/nonzero_plugin.h"
 
 #include <ATen/ATen.h>
 #include <vector>
@@ -46,6 +47,15 @@ auto select_registrations TRTORCH_UNUSED =
                   [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
                     auto in = args[0].ITensor();
 
+                    auto creator = new plugins::NonZeroPluginCreator();
+                    auto plugin = creator->createPlugin("nonzero");
+
+                    auto nonzero_layer = ctx->net->addPluginV2(reinterpret_cast<nvinfer1::ITensor* const*>(&in), 1, *plugin);
+                    TRTORCH_CHECK(nonzero_layer, "Unable to create nonzero plugin from node" << *n);
+
+                    nonzero_layer->setName(util::node_info(n).c_str());
+
+                    auto layer_output = ctx->AssociateValueAndTensor(n->outputs()[0], nonzero_layer->getOutput(0));
                     auto out = ctx->AssociateValueAndTensor(n->outputs()[0], in);
 
                     LOG_DEBUG("Output tensor shape: " << out->getDimensions());
