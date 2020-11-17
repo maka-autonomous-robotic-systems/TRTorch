@@ -193,14 +193,9 @@ nvinfer1::IPluginV2* Conv2DPluginCreator::createPlugin(
 }
 
 Conv2DPlugin* Conv2DPluginCreator::createPlugin(
-    const char* name,
-    std::vector<int64_t> in_shape,
-    std::vector<int64_t> out_shape,
-    std::vector<int64_t> size,
-    std::string mode,
-    bool align_corners) {
+    const char* name) {
   name_ = name;
-  return new Conv2DPlugin(in_shape, out_shape, size, mode, align_corners);
+  return new Conv2DPlugin();
 }
 
 nvinfer1::IPluginV2* Conv2DPluginCreator::deserializePlugin(

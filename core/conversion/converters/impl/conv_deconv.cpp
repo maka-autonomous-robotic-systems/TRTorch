@@ -1,4 +1,5 @@
 #include "torch/torch.h"
+#include "plugins/conv2d_plugin.h"
 
 #include "core/conversion/converters/converters.h"
 #include "core/util/prelude.h"
@@ -52,24 +53,25 @@ auto conv_registrations TRTORCH_UNUSED = RegisterNodeConversionPatterns().patter
   #endif
           new_layer = deconv;
         } else {
-          nvinfer1::IConvolutionLayer* conv;
+          Weights b;
           if (args[2].IValue()->isTensor()) {
-            Weights b(ctx, args[2].unwrapToTensor());
-            conv = ctx->net->addConvolutionNd(*in, w.num_output_maps, w.kernel_shape, w.data, b.data);
+            b = Weights(ctx, args[2].unwrapToTensor());
           } else {
-            Weights b(ctx, at::zeros({1}));
-            conv = ctx->net->addConvolutionNd(*in, w.num_output_maps, w.kernel_shape, w.data, b.data);
+            b = Weights(ctx, at::zeros({1}));
           }
+          auto creator = new plugins::Conv2DPluginCreator();
+          auto plugin = creator->createPlugin("conv2d");
 
-          TRTORCH_CHECK(conv, "Unable to create convolution layer from node: " << *n);
+          auto nonzero_layer = ctx->net->addPluginV2(reinterpret_cast<nvinfer1::ITensor* const*>(&in), 1, *plugin);
+          TRTORCH_CHECK(nonzero_layer, "Unable to create nonzero plugin from node" << *n);
 
-          conv->setStrideNd(stride);
-          conv->setPaddingMode(nvinfer1::PaddingMode::kCAFFE_ROUND_DOWN);
-          conv->setPaddingNd(padding);
-          conv->setPostPadding(out_padding);
-          conv->setDilationNd(dilation);
-          conv->setNbGroups(groups);
-          new_layer = conv;
+          // conv->setStrideNd(stride);
+          // conv->setPaddingMode(nvinfer1::PaddingMode::kCAFFE_ROUND_DOWN);
+          // conv->setPaddingNd(padding);
+          // conv->setPostPadding(out_padding);
+          // conv->setDilationNd(dilation);
+          // conv->setNbGroups(groups);
+          new_layer = nonzero_layer;
         }
         new_layer->setName(util::node_info(n).c_str());
 

@@ -3,6 +3,9 @@ workspace(name = "TRTorch")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
+load ("//:cuda_configure.bzl", "cuda_configure")
+cuda_configure(name = "local_config_cuda")
+
 git_repository(
     name = "rules_python",
     remote = "https://github.com/bazelbuild/rules_python.git",

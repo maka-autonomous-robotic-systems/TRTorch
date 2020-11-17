@@ -11,12 +11,14 @@ cc_library(
     name = "plugins",
     hdrs = [
         "interpolate_plugin.h",
-        "nonzero_plugin.h"
+        "nonzero_plugin.h",
+        "conv2d_plugin.h"
     ],
     srcs = [
         "interpolate_plugin.cpp",
         "nonzero_plugin.cpp",
-        "nonzero_kernel_cu"
+        "nonzero_kernel_cu",
+        "conv2d_plugin.cpp"
     ],
     deps = [
         "@tensorrt//:nvinfer",

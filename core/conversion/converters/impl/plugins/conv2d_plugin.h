@@ -121,12 +121,7 @@ class Conv2DPluginCreator : public nvinfer1::IPluginCreator {
   nvinfer1::IPluginV2* createPlugin(const char* name, const nvinfer1::PluginFieldCollection* fc) override;
 
   Conv2DPlugin* createPlugin(
-      const char* name,
-      std::vector<int64_t> in_shape,
-      std::vector<int64_t> out_shape,
-      std::vector<int64_t> size,
-      std::string mode,
-      bool align_corners);
+      const char* name);
 
   nvinfer1::IPluginV2* deserializePlugin(const char* name, const void* serialData, size_t serialLength) override;
 
