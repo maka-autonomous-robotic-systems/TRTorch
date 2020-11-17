@@ -184,9 +184,6 @@ int Conv2DPlugin::enqueue(
   at::Tensor output = at::from_blob(outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
   auto output_ptr = (float *)output.data_ptr();
 
-  // at::Tensor index = at::zeros({1}, at::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA));
-  // auto index_ptr = (int32_t *)index.data_ptr();
-
   at::cuda::CUDAStream torch_stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAStreamGuard torch_guard(torch_stream);
 
@@ -228,7 +225,10 @@ int Conv2DPlugin::enqueue(
                                              /*mode=*/CUDNN_CROSS_CORRELATION,
                                              /*computeType=*/CUDNN_DATA_FLOAT));
 
-  int batch_size{0}, channels{0}, height{0}, width{0};
+  int batch_size = 0;
+  int channels = 0;
+  int height = 0;
+  int width = 0;
   checkCUDNN(cudnnGetConvolution2dForwardOutputDim(convolution_descriptor,
                                                    input_descriptor,
                                                    kernel_descriptor,
@@ -236,7 +236,6 @@ int Conv2DPlugin::enqueue(
                                                    &channels,
                                                    &height,
                                                    &width));
-  std::cout << batch_size << " " << channels << " " << height << " " << width << std::endl;
 
   cudnnTensorDescriptor_t output_descriptor;
   checkCUDNN(cudnnCreateTensorDescriptor(&output_descriptor));
@@ -260,8 +259,6 @@ int Conv2DPlugin::enqueue(
                                           &num_algos,
                                           &convolution_algorithm));
 
-  std::cout << convolution_algorithm.algo << std::endl;
-
   size_t workspace_bytes{0};
   checkCUDNN(cudnnGetConvolutionForwardWorkspaceSize(cudnn_,
                                                      input_descriptor,
@@ -271,11 +268,10 @@ int Conv2DPlugin::enqueue(
                                                      convolution_algorithm.algo,
                                                      &workspace_bytes));
 
-  void* d_workspace{nullptr};
+  void* d_workspace = nullptr;
   cudaMalloc(&d_workspace, workspace_bytes);
 
   const float alpha = 1.0f, beta = 0.0f;
-
   checkCUDNN(cudnnConvolutionForward(cudnn_,
                                      &alpha,
                                      input_descriptor,
