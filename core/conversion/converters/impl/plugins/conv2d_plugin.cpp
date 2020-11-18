@@ -15,17 +15,33 @@ namespace plugins {
  * Conv2DPlugin class implementations
  */
 
-Conv2DPlugin::Conv2DPlugin() {
+Conv2DPlugin::Conv2DPlugin() : padding_(0, 0), stride_(1, 1) {
   cudnnCreate(&cudnn_);
 }
 
-Conv2DPlugin::Conv2DPlugin(cudnnHandle_t cudnn) : cudnn_(cudnn) {}
+Conv2DPlugin::Conv2DPlugin(cudnnHandle_t cudnn) : cudnn_(cudnn), padding_(0, 0), stride_(1, 1) {}
 
 Conv2DPlugin::Conv2DPlugin(const char* data, size_t length) {
   std::istringstream data_stream(std::string(data, length));
 
   torch::serialize::InputArchive input_archive;
   input_archive.load_from(data_stream);
+}
+
+void Conv2DPlugin::setPadding(const nvinfer1::Dims2& padding) {
+  padding_ = padding;
+}
+
+void Conv2DPlugin::setStride(const nvinfer1::Dims2& stride) {
+  stride_ = stride;
+}
+
+nvinfer1::Dims2 Conv2DPlugin::getPadding() const {
+  return padding_;
+}
+
+nvinfer1::Dims2 Conv2DPlugin::getStride() const {
+  return stride_;
 }
 
 int Conv2DPlugin::getNbOutputs() const {
@@ -45,7 +61,10 @@ const char* Conv2DPlugin::getPluginNamespace() const {
 }
 
 nvinfer1::IPluginV2DynamicExt* Conv2DPlugin::clone() const {
-  return new Conv2DPlugin();
+  auto plugin = new Conv2DPlugin(cudnn_);
+  plugin->setPadding(getPadding());
+  plugin->setStride(getStride());
+  return plugin;
 }
 
 #define checkCUDNN(expression)                               \
@@ -63,11 +82,6 @@ nvinfer1::DimsExprs Conv2DPlugin::getOutputDimensions(
     const nvinfer1::DimsExprs* inputs,
     int nbInputs,
     nvinfer1::IExprBuilder& exprBuilder) {
-  const int pad_width = 0;
-  const int pad_height = 0;
-  const int horizontal_stride = 1;
-  const int vertical_stride = 1;
-
   auto get_dimension = [&](const nvinfer1::IDimensionExpr &input_size, const nvinfer1::IDimensionExpr &kernel_size, int padding, int stride) {
     return exprBuilder.operation(nvinfer1::DimensionOperation::kSUM,
               *exprBuilder.operation(nvinfer1::DimensionOperation::kCEIL_DIV,
@@ -83,8 +97,8 @@ nvinfer1::DimsExprs Conv2DPlugin::getOutputDimensions(
 
   output.d[0] = inputs[0].d[0];
   output.d[1] = inputs[1].d[0];
-  output.d[2] = get_dimension(*inputs[0].d[2], *inputs[1].d[2], pad_height, vertical_stride);
-  output.d[3] = get_dimension(*inputs[0].d[3], *inputs[1].d[3], pad_width, horizontal_stride);
+  output.d[2] = get_dimension(*inputs[0].d[2], *inputs[1].d[2], padding_.d[0], stride_.d[0]);
+  output.d[3] = get_dimension(*inputs[0].d[3], *inputs[1].d[3], padding_.d[1], stride_.d[1]);
 
   return output;
 }
@@ -184,6 +198,8 @@ int Conv2DPlugin::enqueue(
   at::Tensor output = at::from_blob(outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
   auto output_ptr = (float *)output.data_ptr();
 
+  std::cout << "out dims " << outputDesc->dims << std::endl;
+
   at::cuda::CUDAStream torch_stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAStreamGuard torch_guard(torch_stream);
 
@@ -216,10 +232,10 @@ int Conv2DPlugin::enqueue(
   cudnnConvolutionDescriptor_t convolution_descriptor;
   checkCUDNN(cudnnCreateConvolutionDescriptor(&convolution_descriptor));
   checkCUDNN(cudnnSetConvolution2dDescriptor(convolution_descriptor,
-                                             /*pad_height=*/0,
-                                             /*pad_width=*/0,
-                                             /*vertical_stride=*/1,
-                                             /*horizontal_stride=*/1,
+                                             /*pad_height=*/padding_.d[0],
+                                             /*pad_width=*/padding_.d[1],
+                                             /*vertical_stride=*/stride_.d[0],
+                                             /*horizontal_stride=*/stride_.d[1],
                                              /*dilation_height=*/1,
                                              /*dilation_width=*/1,
                                              /*mode=*/CUDNN_CROSS_CORRELATION,

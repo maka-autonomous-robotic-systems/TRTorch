@@ -41,6 +41,8 @@ auto conv_registrations TRTORCH_UNUSED = RegisterNodeConversionPatterns().patter
         }
         auto creator = new plugins::Conv2DPluginCreator();
         auto plugin = creator->createPlugin("conv2d");
+        plugin->setPadding({padding.d[0], padding.d[1]});
+        plugin->setStride({stride.d[0], stride.d[1]});
 
         nvinfer1::ITensor* inputs[] = {in, w};
 

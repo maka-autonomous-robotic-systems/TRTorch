@@ -29,6 +29,8 @@ class Conv2DPlugin : public nvinfer1::IPluginV2DynamicExt {
   DataType dtype_;
 
   cudnnHandle_t cudnn_;
+  nvinfer1::Dims2 padding_;
+  nvinfer1::Dims2 stride_;
 //   cudnnTensorDescriptor_t input_descriptor_;
 //   cudnnFilterDescriptor_t kernel_descriptor_;
 
@@ -48,6 +50,14 @@ class Conv2DPlugin : public nvinfer1::IPluginV2DynamicExt {
   Conv2DPlugin(cudnnHandle_t cudnn);
 
   Conv2DPlugin(const char* data, size_t length);
+
+  void setPadding(const nvinfer1::Dims2& padding);
+
+  void setStride(const nvinfer1::Dims2& stride);
+
+  nvinfer1::Dims2 getPadding() const;
+
+  nvinfer1::Dims2 getStride() const;
 
   int getNbOutputs() const override;
 
