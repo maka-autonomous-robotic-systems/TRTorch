@@ -26,6 +26,22 @@ Conv2DPlugin::Conv2DPlugin(const char* data, size_t length) {
 
   torch::serialize::InputArchive input_archive;
   input_archive.load_from(data_stream);
+
+  {
+    torch::IValue value;
+    input_archive.read("padding", value);
+    auto padding_vector = value.toIntVector();
+    padding_ = {static_cast<int32_t>(padding_vector[0]), static_cast<int32_t>(padding_vector[1])};
+  }
+
+  {
+    torch::IValue value;
+    input_archive.read("stride", value);
+    auto stride_vector = value.toIntVector();
+    stride_ = {static_cast<int32_t>(stride_vector[0]), static_cast<int32_t>(stride_vector[1])};
+  }
+
+  cudnnCreate(&cudnn_);
 }
 
 void Conv2DPlugin::setPadding(const nvinfer1::Dims2& padding) {
@@ -131,6 +147,9 @@ void Conv2DPlugin::serialize(void* buffer) const {
 std::string Conv2DPlugin::serializeToString() const {
   torch::serialize::OutputArchive output_archive;
 
+  output_archive.write("padding", torch::IValue(std::vector<int64_t>{padding_.d[0], padding_.d[1]}));
+  output_archive.write("stride", torch::IValue(std::vector<int64_t>{stride_.d[0], stride_.d[1]}));
+
   std::ostringstream data_str;
   output_archive.save_to(data_str);
 
@@ -198,7 +217,11 @@ int Conv2DPlugin::enqueue(
   at::Tensor output = at::from_blob(outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
   auto output_ptr = (float *)output.data_ptr();
 
+  std::cout << "input 0 dims " << inputDesc[0].dims << std::endl;
+  std::cout << "input 1 dims " << inputDesc[1].dims << std::endl;
   std::cout << "out dims " << outputDesc->dims << std::endl;
+  std::cout << "padding " << padding_ << std::endl;
+  std::cout << "stride " << stride_ << std::endl;
 
   at::cuda::CUDAStream torch_stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAStreamGuard torch_guard(torch_stream);
