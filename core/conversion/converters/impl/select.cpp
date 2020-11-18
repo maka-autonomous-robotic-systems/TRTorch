@@ -61,46 +61,12 @@ auto select_registrations TRTORCH_UNUSED =
 
                     return true;
                   }})
-        .pattern({"aten::slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> (Tensor(a))",
-                  [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
-                    auto in = args[0].ITensor();
-                    auto dim = args[1].unwrapToInt();
-                    auto start = args[2].unwrapToInt();
-                    auto end = args[3].unwrapToInt();
-                    
-                    auto dims = in->getDimensions();
-
-                    end = std::min((long)dims.d[dim], end);
-                    dims.d[dim] = end - start;
-
-                    nvinfer1::Dims start_idx;
-                    start_idx.nbDims = dims.nbDims;
-                    nvinfer1::Dims sizes;
-                    sizes.nbDims = dims.nbDims;
-                    nvinfer1::Dims strides;
-                    strides.nbDims = dims.nbDims;
-                    for (int i = 0; i < dims.nbDims; i++) {
-                      if (i == dim) {
-                        start_idx.d[i] = start;
-                        sizes.d[i] = end - start;
-                      } else {
-                        start_idx.d[i] = 0;
-                        sizes.d[i] = dims.d[i];
-                      }
-                      strides.d[i] = 0;
-                    }
-
-                    auto slice_layer = ctx->net->addSlice(*in,start_idx, sizes, strides);
-                    auto out = ctx->AssociateValueAndTensor(n->outputs()[0], slice_layer->getOutput(0));
-
-                    LOG_DEBUG("Output tensor shape: " << out->getDimensions());
-
-                    return true;
-                  }})
         .pattern({"aten::constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> (Tensor)",
                   [](ConversionCtx* ctx, const torch::jit::Node* n, args& args) -> bool {
                     auto in = args[0].ITensor();
                     auto pad_dims = util::toDims(args[1].unwrapToIntList());
+                    auto value = args[2].unwrapToScalar().to<float>();;
+                    TRTORCH_CHECK(value == 0, "Only zero padding currently supported. Requested " << value);
                     auto left = pad_dims.d[0];
                     auto right = pad_dims.d[1];
                     auto top = pad_dims.d[2];

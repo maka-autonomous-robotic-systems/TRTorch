@@ -28,6 +28,10 @@ converter_test(
 )
 
 converter_test(
+  name = "test_instance_norm"
+)
+
+converter_test(
   name = "test_linear"
 )
 
