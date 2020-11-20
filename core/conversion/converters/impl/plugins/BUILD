@@ -12,13 +12,16 @@ cc_library(
     hdrs = [
         "interpolate_plugin.h",
         "nonzero_plugin.h",
-        "conv2d_plugin.h"
+        "conv2d_plugin.h",
+        "set_max_plugin.h"
     ],
     srcs = [
         "interpolate_plugin.cpp",
         "nonzero_plugin.cpp",
         "nonzero_kernel_cu",
-        "conv2d_plugin.cpp"
+        "conv2d_plugin.cpp",
+        "set_max_plugin.cpp",
+        "set_max_kernel_cu"
     ],
     deps = [
         "@tensorrt//:nvinfer",
@@ -50,5 +53,13 @@ genrule(
     srcs = ["nonzero_kernel.cu"],
     outs = ["nonzero_kernel.o"],
     cmd = "$(location @local_config_cuda//:nvcc) --compile $(SRCS) --output-file $(OUTS) --extended-lambda",
+    tools = ["@local_config_cuda//:nvcc"],
+)
+
+genrule(
+    name = "set_max_kernel_cu",
+    srcs = ["set_max_kernel.cu"],
+    outs = ["set_max_kernel.o"],
+    cmd = "$(location @local_config_cuda//:nvcc) --compile $(SRCS) --output-file $(OUTS) -D_GLIBCXX_USE_CXX11_ABI=0 -I/usr/local/lib/python3.6/dist-packages/torch/include/torch/csrc/api/include -I/usr/local/lib/python3.6/dist-packages/torch/include --extended-lambda --expt-relaxed-constexpr",
     tools = ["@local_config_cuda//:nvcc"],
 )

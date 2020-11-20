@@ -2,7 +2,7 @@
 
 using namespace nvinfer1;
 
-void NonZeroKernel(float *input, float *output, int32_t *index, int batch_size, int channels, int height, int width);
+void NonZeroKernel(float* input, float* output, int32_t* index, int batch_size, int channels, int height, int width);
 
 namespace trtorch {
 namespace core {
@@ -141,12 +141,13 @@ int NonZeroPlugin::enqueue(
     void* workspace,
     cudaStream_t stream) {
   at::Tensor input = at::from_blob((void*)inputs[0], util::toVec(inputDesc->dims), [](void*) {}, tensor_options_);
-  auto input_ptr = (float *)input.data_ptr();
-  at::Tensor output = at::from_blob(outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
-  auto output_ptr = (float *)output.data_ptr();
+  auto input_ptr = (float*)input.data_ptr();
+  at::Tensor output = at::from_blob(
+      outputs[0], util::volume(outputDesc->dims), [](void*) {}, tensor_options_);
+  auto output_ptr = (float*)output.data_ptr();
 
   at::Tensor index = at::zeros({1}, at::TensorOptions().dtype(torch::kInt32).device(torch::kCUDA));
-  auto index_ptr = (int32_t *)index.data_ptr();
+  auto index_ptr = (int32_t*)index.data_ptr();
 
   at::cuda::CUDAStream torch_stream = at::cuda::getStreamFromPool();
   at::cuda::CUDAStreamGuard torch_guard(torch_stream);
@@ -159,9 +160,9 @@ int NonZeroPlugin::enqueue(
 
   auto num_dims = input.dim();
   auto dims = input.sizes();
-  const int batch_size = num_dims > 3 ? dims[num_dims - 3] : 1;
-  const int channels = num_dims > 2 ? dims[num_dims - 2] : 1;
-  const int height = num_dims > 1 ? dims[num_dims - 1] : 1;
+  const int batch_size = num_dims > 3 ? dims[num_dims - 4] : 1;
+  const int channels = num_dims > 2 ? dims[num_dims - 3] : 1;
+  const int height = num_dims > 1 ? dims[num_dims - 2] : 1;
   const int width = dims[num_dims - 1];
 
   NonZeroKernel(input_ptr, output_ptr, index_ptr, batch_size, channels, height, width);
@@ -193,14 +194,11 @@ const char* NonZeroPluginCreator::getPluginVersion() const {
   return "1";
 }
 
-nvinfer1::IPluginV2* NonZeroPluginCreator::createPlugin(
-    const char* name,
-    const nvinfer1::PluginFieldCollection* fc) {
+nvinfer1::IPluginV2* NonZeroPluginCreator::createPlugin(const char* name, const nvinfer1::PluginFieldCollection* fc) {
   return nullptr;
 }
 
-NonZeroPlugin* NonZeroPluginCreator::createPlugin(
-    const char* name) {
+NonZeroPlugin* NonZeroPluginCreator::createPlugin(const char* name) {
   name_ = name;
   return new NonZeroPlugin();
 }

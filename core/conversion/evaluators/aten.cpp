@@ -427,6 +427,7 @@ auto aten_registrations TRTORCH_UNUSED =
                     },
                     EvalOptions().validSchemas({
                         "aten::div.Scalar(Scalar a, Scalar b) -> (float)",
+                        "aten::div.float(float a, float b) -> (float)"
                     })})
         .evaluator({c10::Symbol::fromQualString("aten::floordiv"),
                     [](const torch::jit::Node* n, kwargs& args) -> c10::optional<torch::jit::IValue> {
@@ -458,6 +459,16 @@ auto aten_registrations TRTORCH_UNUSED =
                     EvalOptions().validSchemas({
                         "aten::floor.float(float a) -> (int)",
                     })})
+        .evaluator(
+            {c10::Symbol::fromQualString("aten::ceil"),
+             [](const torch::jit::Node* n, kwargs& args) -> c10::optional<torch::jit::IValue> {
+               auto el = args.at(n->input(0)).unwrapToDouble();
+
+               return static_cast<int64_t>(std::ceil(el));
+             },
+             EvalOptions().validSchemas({
+                 "aten::ceil.float(float a) -> (int)",
+             })})
         .evaluator({c10::Symbol::fromQualString("aten::warn"),
                     [](const torch::jit::Node* n, kwargs& args) -> c10::optional<torch::jit::IValue> {
                       auto warning = args.at(n->input(0)).IValue();
